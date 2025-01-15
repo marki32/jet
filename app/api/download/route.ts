@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server';
 import ytdl from '@distube/ytdl-core';
 
-export const maxDuration = 300; // 5 minutes timeout
+// Vercel hobby plan limit is 60 seconds
+export const runtime = 'edge';
+export const maxDuration = 60;
 
 export async function POST(req: Request) {
     try {
@@ -19,10 +21,10 @@ export async function POST(req: Request) {
         const basicInfo = await ytdl.getBasicInfo(url);
         const videoLength = parseInt(basicInfo.videoDetails.lengthSeconds);
 
-        // Optional: Add length check to prevent very large downloads
-        if (videoLength > 600) { // 10 minutes max
+        // Limit video length to 5 minutes for Vercel hobby plan
+        if (videoLength > 300) { // 5 minutes max
             return NextResponse.json({ 
-                error: 'Video is too long. Maximum length is 10 minutes.' 
+                error: 'Video is too long. Maximum length is 5 minutes due to server limitations.' 
             }, { status: 400 });
         }
 
@@ -54,6 +56,9 @@ export async function POST(req: Request) {
                     controller.error(err);
                 });
             },
+            cancel() {
+                videoStream.destroy();
+            }
         });
 
         // Return stream response
