@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { spawn } from 'child_process';
+import YTDlpWrap from 'yt-dlp-exec';
 
 export async function POST(req: Request) {
     try {
@@ -9,55 +9,36 @@ export async function POST(req: Request) {
             return NextResponse.json({ error: 'URL is required' }, { status: 400 });
         }
 
-        // Create a ReadableStream to pipe the video data
+        const ytDlp = new YTDlpWrap();
+
+        // Get video info first
+        const videoInfo = await ytDlp.getVideoInfo(url);
+        
+        // Create a safe filename
+        const safeFilename = `${videoInfo.title?.replace(/[^\w\s-]/g, '').replace(/\s+/g, '_') || 'video'}.mp4`;
+
+        // Create a ReadableStream
         const stream = new ReadableStream({
             async start(controller) {
-                const ytDlp = spawn('yt-dlp', [
-                    url,
-                    '-o', '-',  // Output to stdout
-                    '-f', 'best[ext=mp4]',
-                ]);
+                try {
+                    const downloadProcess = await ytDlp.exec([
+                        url,
+                        '-o', '-',  // Output to stdout
+                        '-f', 'best[ext=mp4]',
+                    ], {
+                        stdout: (chunk) => {
+                            controller.enqueue(chunk);
+                        },
+                    });
 
-                ytDlp.stdout.on('data', (chunk) => {
-                    controller.enqueue(chunk);
-                });
-
-                ytDlp.stderr.on('data', (data) => {
-                    console.error(`yt-dlp error: ${data}`);
-                });
-
-                ytDlp.on('close', (code) => {
-                    if (code === 0) {
-                        controller.close();
-                    } else {
-                        controller.error(new Error('Download failed'));
-                    }
-                });
-
-                ytDlp.on('error', (err) => {
-                    controller.error(err);
-                });
+                    await downloadProcess;
+                    controller.close();
+                } catch (error) {
+                    console.error('Download error:', error);
+                    controller.error(error);
+                }
             }
         });
-
-        // Get video title for filename
-        const infoProcess = spawn('yt-dlp', [
-            url,
-            '--get-title'
-        ]);
-
-        let videoTitle = '';
-        await new Promise((resolve) => {
-            infoProcess.stdout.on('data', (data) => {
-                videoTitle = data.toString().trim()
-                    .replace(/[^\w\s-]/g, '') // Remove special characters
-                    .replace(/\s+/g, '_');    // Replace spaces with underscores
-            });
-            infoProcess.on('close', resolve);
-        });
-
-        // Set a safe filename
-        const safeFilename = `${videoTitle || 'video'}.mp4`;
 
         // Return the stream with proper headers
         return new Response(stream, {
